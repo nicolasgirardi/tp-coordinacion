@@ -8,6 +8,7 @@ import (
 	"github.com/7574-sistemas-distribuidos/tp-coordinacion/common/fruititem"
 	"github.com/7574-sistemas-distribuidos/tp-coordinacion/common/messageprotocol/inner"
 	"github.com/7574-sistemas-distribuidos/tp-coordinacion/common/middleware"
+	"github.com/7574-sistemas-distribuidos/tp-coordinacion/common/recordkey"
 )
 
 type AggregationConfig struct {
@@ -25,7 +26,7 @@ type AggregationConfig struct {
 type Aggregation struct {
 	outputQueue   middleware.Middleware
 	inputExchange middleware.Middleware
-	fruitItemMap  map[string]fruititem.FruitItem
+	fruitItemMap  map[recordkey.FruitKey]fruititem.FruitItem
 	topSize       int
 }
 
@@ -47,7 +48,7 @@ func NewAggregation(config AggregationConfig) (*Aggregation, error) {
 	return &Aggregation{
 		outputQueue:   outputQueue,
 		inputExchange: inputExchange,
-		fruitItemMap:  map[string]fruititem.FruitItem{},
+		fruitItemMap:  map[recordkey.FruitKey]fruititem.FruitItem{},
 		topSize:       config.TopSize,
 	}, nil
 }
@@ -61,27 +62,32 @@ func (aggregation *Aggregation) Run() {
 func (aggregation *Aggregation) handleMessage(msg middleware.Message, ack func(), nack func()) {
 	defer ack()
 
-	fruitRecords, isEof, err := inner.DeserializeMessage(&msg)
+	fruitRecords, isEof, clientID, err := inner.DeserializeMessage(&msg)
 	if err != nil {
 		slog.Error("While deserializing message", "err", err)
 		return
 	}
 
+	if clientID == 0 {
+		slog.Error("Client ID is invalid")
+		return
+	}
+
 	if isEof {
-		if err := aggregation.handleEndOfRecordsMessage(); err != nil {
+		if err := aggregation.handleEndOfRecordsMessage(clientID); err != nil {
 			slog.Error("While handling end of record message", "err", err)
 		}
 		return
 	}
 
-	aggregation.handleDataMessage(fruitRecords)
+	aggregation.handleDataMessage(fruitRecords, clientID)
 }
 
-func (aggregation *Aggregation) handleEndOfRecordsMessage() error {
+func (aggregation *Aggregation) handleEndOfRecordsMessage(clientID uint32) error {
 	slog.Info("Received End Of Records message")
 
-	fruitTopRecords := aggregation.buildFruitTop()
-	message, err := inner.SerializeMessage(fruitTopRecords)
+	fruitTopRecords := aggregation.buildFruitTop(clientID)
+	message, err := inner.SerializeMessage(fruitTopRecords, clientID)
 	if err != nil {
 		slog.Debug("While serializing top message", "err", err)
 		return err
@@ -92,7 +98,7 @@ func (aggregation *Aggregation) handleEndOfRecordsMessage() error {
 	}
 
 	eofMessage := []fruititem.FruitItem{}
-	message, err = inner.SerializeMessage(eofMessage)
+	message, err = inner.SerializeMessage(eofMessage, clientID)
 	if err != nil {
 		slog.Debug("While serializing EOF message", "err", err)
 		return err
@@ -104,20 +110,23 @@ func (aggregation *Aggregation) handleEndOfRecordsMessage() error {
 	return nil
 }
 
-func (aggregation *Aggregation) handleDataMessage(fruitRecords []fruititem.FruitItem) {
+func (aggregation *Aggregation) handleDataMessage(fruitRecords []fruititem.FruitItem, clientID uint32) {
 	for _, fruitRecord := range fruitRecords {
-		if _, ok := aggregation.fruitItemMap[fruitRecord.Fruit]; ok {
-			aggregation.fruitItemMap[fruitRecord.Fruit] = aggregation.fruitItemMap[fruitRecord.Fruit].Sum(fruitRecord)
+		recordKey := recordkey.FruitKey{ClientID: clientID, FruitName: fruitRecord.Fruit}
+		if _, ok := aggregation.fruitItemMap[recordKey]; ok {
+			aggregation.fruitItemMap[recordKey] = aggregation.fruitItemMap[recordKey].Sum(fruitRecord)
 		} else {
-			aggregation.fruitItemMap[fruitRecord.Fruit] = fruitRecord
+			aggregation.fruitItemMap[recordKey] = fruitRecord
 		}
 	}
 }
 
-func (aggregation *Aggregation) buildFruitTop() []fruititem.FruitItem {
+func (aggregation *Aggregation) buildFruitTop(clientID uint32) []fruititem.FruitItem {
 	fruitItems := make([]fruititem.FruitItem, 0, len(aggregation.fruitItemMap))
-	for _, item := range aggregation.fruitItemMap {
-		fruitItems = append(fruitItems, item)
+	for key, item := range aggregation.fruitItemMap {
+		if key.ClientID == clientID {
+			fruitItems = append(fruitItems, item)
+		}
 	}
 	sort.SliceStable(fruitItems, func(i, j int) bool {
 		return fruitItems[j].Less(fruitItems[i])

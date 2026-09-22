@@ -20,8 +20,9 @@ func deserializeJson(message []byte) ([]interface{}, error) {
 	return data, nil
 }
 
-func SerializeMessage(fruitRecords []fruititem.FruitItem) (*middleware.Message, error) {
-	data := []interface{}{}
+func SerializeMessage(fruitRecords []fruititem.FruitItem, clientID uint32) (*middleware.Message, error) {
+	client := []interface{}{"clientID", clientID}
+	data := []interface{}{client}
 	for _, fruitRecord := range fruitRecords {
 		datum := []interface{}{
 			fruitRecord.Fruit,
@@ -39,32 +40,37 @@ func SerializeMessage(fruitRecords []fruititem.FruitItem) (*middleware.Message, 
 	return &message, nil
 }
 
-func DeserializeMessage(message *middleware.Message) ([]fruititem.FruitItem, bool, error) {
+func DeserializeMessage(message *middleware.Message) ([]fruititem.FruitItem, bool, uint32, error) {
 	data, err := deserializeJson([]byte((*message).Body))
 	if err != nil {
-		return nil, false, err
+		return nil, false, 0, err
 	}
+	clientID := uint32(0)
 
 	fruitRecords := []fruititem.FruitItem{}
 	for _, datum := range data {
 		fruitPair, ok := datum.([]interface{})
 		if !ok {
-			return nil, false, errors.New("Datum is not an array")
+			return nil, false, 0, errors.New("Datum is not an array")
 		}
 
 		fruit, ok := fruitPair[0].(string)
 		if !ok {
-			return nil, false, errors.New("Datum is not a (fruit, amount) pair")
+			return nil, false, 0, errors.New("Datum is not a (fruit, amount) pair")
 		}
 
 		fruitAmount, ok := fruitPair[1].(float64)
 		if !ok {
-			return nil, false, errors.New("Datum is not a (fruit, amount) pair")
+			return nil, false, 0, errors.New("Datum is not a (fruit, amount) pair")
 		}
 
-		fruitRecord := fruititem.FruitItem{Fruit: fruit, Amount: uint32(fruitAmount)}
-		fruitRecords = append(fruitRecords, fruitRecord)
+		if fruit == "clientID" {
+			clientID = uint32(fruitAmount)
+		} else {
+			fruitRecord := fruititem.FruitItem{Fruit: fruit, Amount: uint32(fruitAmount)}
+			fruitRecords = append(fruitRecords, fruitRecord)
+		}
 	}
 
-	return fruitRecords, len(fruitRecords) == 0, nil
+	return fruitRecords, len(fruitRecords) == 0, clientID, nil
 }
