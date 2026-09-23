@@ -3,6 +3,7 @@ package sum
 import (
 	"fmt"
 	"log/slog"
+	"sync"
 
 	"github.com/7574-sistemas-distribuidos/tp-coordinacion/common/fruititem"
 	"github.com/7574-sistemas-distribuidos/tp-coordinacion/common/messageprotocol/inner"
@@ -22,9 +23,11 @@ type SumConfig struct {
 }
 
 type Sum struct {
-	inputQueue     middleware.Middleware
-	outputExchange middleware.Middleware
-	fruitItemMap   map[recordkey.FruitKey]fruititem.FruitItem
+	inputQueue        middleware.Middleware
+	outputExchange    middleware.Middleware
+	broadcastExchange middleware.Middleware
+	fruitItemMap      map[recordkey.FruitKey]fruititem.FruitItem
+	mutex             sync.Mutex
 }
 
 func NewSum(config SumConfig) (*Sum, error) {
@@ -46,14 +49,25 @@ func NewSum(config SumConfig) (*Sum, error) {
 		return nil, err
 	}
 
+	broadcastExchange, err := middleware.CreateExchangeMiddleware("sum broadcast", []string{"EoF"}, connSettings)
+	if err != nil {
+		inputQueue.Close()
+		outputExchange.Close()
+		return nil, err
+	}
+
 	return &Sum{
-		inputQueue:     inputQueue,
-		outputExchange: outputExchange,
-		fruitItemMap:   map[recordkey.FruitKey]fruititem.FruitItem{},
+		inputQueue:        inputQueue,
+		outputExchange:    outputExchange,
+		broadcastExchange: broadcastExchange,
+		fruitItemMap:      map[recordkey.FruitKey]fruititem.FruitItem{},
 	}, nil
 }
 
 func (sum *Sum) Run() {
+	go sum.broadcastExchange.StartConsuming(func(msg middleware.Message, ack, nack func()) {
+		sum.handleBroadcastFromOtherSum(msg, ack, nack)
+	})
 	sum.inputQueue.StartConsuming(func(msg middleware.Message, ack, nack func()) {
 		sum.handleMessage(msg, ack, nack)
 	})
@@ -85,9 +99,32 @@ func (sum *Sum) handleMessage(msg middleware.Message, ack func(), nack func()) {
 	}
 }
 
-func (sum *Sum) handleEndOfRecordMessage(clientID uint32) error {
-	slog.Info("Received End Of Records message")
+func (sum *Sum) handleBroadcastFromOtherSum(msg middleware.Message, ack func(), nack func()) {
+	defer ack()
 
+	_, isEof, clientID, err := inner.DeserializeMessage(&msg)
+	if err != nil {
+		slog.Error("While deserializing message", "err", err)
+		return
+	}
+
+	if clientID == 0 {
+		slog.Error("Records have no client associated")
+		return
+	}
+
+	if isEof {
+		if err := sum.handleEndOfRecordBroadcast(clientID); err != nil {
+			slog.Error("While handling end of record message", "err", err)
+		}
+		return
+	}
+}
+
+func (sum *Sum) handleEndOfRecordBroadcast(clientID uint32) error {
+	slog.Info("Received End Of Records message")
+	sum.mutex.Lock()
+	defer sum.mutex.Unlock()
 	for key := range sum.fruitItemMap {
 		if key.ClientID != clientID {
 			continue
@@ -117,7 +154,24 @@ func (sum *Sum) handleEndOfRecordMessage(clientID uint32) error {
 	return nil
 }
 
+func (sum *Sum) handleEndOfRecordMessage(clientID uint32) error {
+	slog.Info("Received Endof Record message")
+	eofMessage := []fruititem.FruitItem{}
+	message, err := inner.SerializeMessage(eofMessage, clientID)
+	if err != nil {
+		slog.Debug("While serializing EOF message", "err", err)
+		return err
+	}
+	if err := sum.broadcastExchange.Send(*message); err != nil {
+		slog.Debug("While sending EOF message", "err", err)
+		return err
+	}
+	return nil
+}
+
 func (sum *Sum) handleDataMessage(fruitRecords []fruititem.FruitItem, clientID uint32) error {
+	sum.mutex.Lock()
+	defer sum.mutex.Unlock()
 	for _, fruitRecord := range fruitRecords {
 		recordKey := recordkey.FruitKey{ClientID: clientID, FruitName: fruitRecord.Fruit}
 		_, ok := sum.fruitItemMap[recordKey]
