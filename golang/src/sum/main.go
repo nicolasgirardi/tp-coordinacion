@@ -86,7 +86,6 @@ func run() int {
 		sig := <-sigChan
 		slog.Info("signal-received", "signal", sig)
 		closeServer()
-		os.Exit(0)
 	}()
 	server.Run()
 	return 0
