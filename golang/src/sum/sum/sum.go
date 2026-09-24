@@ -8,6 +8,7 @@ import (
 	"github.com/7574-sistemas-distribuidos/tp-coordinacion/common/fruititem"
 	"github.com/7574-sistemas-distribuidos/tp-coordinacion/common/messageprotocol/inner"
 	"github.com/7574-sistemas-distribuidos/tp-coordinacion/common/middleware"
+	"github.com/7574-sistemas-distribuidos/tp-coordinacion/common/myhashing"
 	"github.com/7574-sistemas-distribuidos/tp-coordinacion/common/recordkey"
 )
 
@@ -28,6 +29,8 @@ type Sum struct {
 	broadcastExchange middleware.Middleware
 	fruitItemMap      map[recordkey.FruitKey]fruititem.FruitItem
 	mutex             sync.Mutex
+	aggregationKeys   map[uint32]string
+	aggAmount         uint32
 }
 
 func NewSum(config SumConfig) (*Sum, error) {
@@ -37,10 +40,12 @@ func NewSum(config SumConfig) (*Sum, error) {
 	if err != nil {
 		return nil, err
 	}
+	aggregationKeys := map[uint32]string{}
 
 	outputExchangeRouteKeys := make([]string, config.AggregationAmount)
 	for i := range config.AggregationAmount {
 		outputExchangeRouteKeys[i] = fmt.Sprintf("%s_%d", config.AggregationPrefix, i)
+		aggregationKeys[uint32(i)] = outputExchangeRouteKeys[i]
 	}
 
 	outputExchange, err := middleware.CreateExchangeMiddleware(config.AggregationPrefix, outputExchangeRouteKeys, connSettings)
@@ -61,6 +66,8 @@ func NewSum(config SumConfig) (*Sum, error) {
 		outputExchange:    outputExchange,
 		broadcastExchange: broadcastExchange,
 		fruitItemMap:      map[recordkey.FruitKey]fruititem.FruitItem{},
+		aggregationKeys:   aggregationKeys,
+		aggAmount:         uint32(config.AggregationAmount),
 	}, nil
 }
 
@@ -135,7 +142,9 @@ func (sum *Sum) handleEndOfRecordBroadcast(clientID uint32) error {
 			slog.Debug("While serializing message", "err", err)
 			return err
 		}
-		if err := sum.outputExchange.Send(*message); err != nil {
+		hash := myhashing.HashString(key, sum.aggAmount)
+		key := sum.aggregationKeys[hash]
+		if err := sum.outputExchange.SendWithKeys(*message, []string{key}); err != nil {
 			slog.Debug("While sending message", "err", err)
 			return err
 		}

@@ -129,6 +129,10 @@ func (mQ *MyQueueMiddleware) Send(msg Message) error {
 	return nil
 }
 
+func (mQ *MyQueueMiddleware) SendWithKeys(msg Message, _key []string) error {
+	return mQ.Send(msg)
+}
+
 func (mQ *MyQueueMiddleware) Close() error {
 	err := mQ.StopConsuming()
 	if err != nil {
@@ -222,6 +226,16 @@ func (mE *MyExchangeMiddleware) StopConsuming() error {
 
 func (mE *MyExchangeMiddleware) Send(msg Message) error {
 	for _, key := range mE.myKeys {
+		err := mE.myChannel.Publish(mE.myExchangeName, key, false, false, amqp.Publishing{ContentType: "text/plain", Body: []byte(msg.Body)})
+		if err != nil {
+			return ErrMessageMiddlewareDisconnected
+		}
+	}
+	return nil
+}
+
+func (mE *MyExchangeMiddleware) SendWithKeys(msg Message, keys []string) error {
+	for _, key := range keys {
 		err := mE.myChannel.Publish(mE.myExchangeName, key, false, false, amqp.Publishing{ContentType: "text/plain", Body: []byte(msg.Body)})
 		if err != nil {
 			return ErrMessageMiddlewareDisconnected
