@@ -146,3 +146,8 @@ func (aggregation *Aggregation) buildFruitTop(clientID uint32) []fruititem.Fruit
 	finalTopSize := min(aggregation.topSize, len(fruitItems))
 	return fruitItems[:finalTopSize]
 }
+
+func (Aggregation *Aggregation) Close(){
+	Aggregation.inputExchange.Close()
+	Aggregation.outputQueue.Close()
+}

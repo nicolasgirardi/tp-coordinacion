@@ -144,3 +144,8 @@ func (join *Join) buildFruitTop(clientID uint32) []fruititem.FruitItem {
 	finalTopSize := min(join.topSize, len(fruitItems))
 	return fruitItems[:finalTopSize]
 }
+
+func (join *Join) Close() {
+	join.inputQueue.Close()
+	join.outputQueue.Close()
+}

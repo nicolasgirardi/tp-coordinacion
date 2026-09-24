@@ -4,7 +4,9 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
 
 	"github.com/7574-sistemas-distribuidos/tp-coordinacion/join"
 )
@@ -80,6 +82,19 @@ func run() int {
 		slog.Error("While initializing join", "err", err)
 		return 1
 	}
+
+	defer server.Close()
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	closeServer := server.Close
+
+	go func() {
+		sig := <-sigChan
+		slog.Info("signal-received", "signal", sig)
+		closeServer()
+		os.Exit(0)
+	}()
 
 	server.Run()
 	return 0

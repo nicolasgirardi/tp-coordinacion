@@ -192,3 +192,9 @@ func (sum *Sum) handleDataMessage(fruitRecords []fruititem.FruitItem, clientID u
 	}
 	return nil
 }
+
+func (sum *Sum) Close() {
+	sum.inputQueue.Close()
+	sum.outputExchange.Close()
+	sum.broadcastExchange.Close()
+}
