@@ -105,17 +105,6 @@ func (join *Join) handleEndOfRecordsMessage(clientID uint32) error {
 			slog.Debug("While sending top message", "err", err)
 			return err
 		}
-
-		eofMessage := []fruititem.FruitItem{}
-		message, err = inner.SerializeMessage(eofMessage, clientID)
-		if err != nil {
-			slog.Debug("While serializing EOF message", "err", err)
-			return err
-		}
-		if err := join.outputQueue.Send(*message); err != nil {
-			slog.Debug("While sending EOF message", "err", err)
-			return err
-		}
 	}
 	return nil
 }

@@ -155,6 +155,18 @@ func CreateQueueMiddleware(queueName string, connectionSettings ConnSettings) (M
 		}
 		return nil, ErrMessageMiddlewareDisconnected
 	}
+	err = channel.Qos(
+		1,     // prefetch count
+		0,     // prefetch size
+		false, // global
+	)
+	if err != nil {
+		er := CloseResources(channel, conn)
+		if er != nil {
+			return nil, er
+		}
+		return nil, ErrMessageMiddlewareDisconnected
+	}
 	queue, err := channel.QueueDeclare(queueName, true, false, false, false, amqp.Table{
 		amqp.QueueTypeArg: amqp.QueueTypeQuorum,
 	})
