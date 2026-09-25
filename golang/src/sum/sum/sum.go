@@ -81,8 +81,9 @@ func (sum *Sum) Run() {
 }
 
 func (sum *Sum) handleMessage(msg middleware.Message, ack func(), nack func()) {
+	sum.mutex.Lock()
+	defer sum.mutex.Unlock()
 	defer ack()
-
 	fruitRecords, isEof, clientID, err := inner.DeserializeMessage(&msg)
 	if err != nil {
 		slog.Error("While deserializing message", "err", err)
@@ -179,8 +180,6 @@ func (sum *Sum) handleEndOfRecordMessage(clientID uint32) error {
 }
 
 func (sum *Sum) handleDataMessage(fruitRecords []fruititem.FruitItem, clientID uint32) error {
-	sum.mutex.Lock()
-	defer sum.mutex.Unlock()
 	for _, fruitRecord := range fruitRecords {
 		recordKey := recordkey.FruitKey{ClientID: clientID, FruitName: fruitRecord.Fruit}
 		_, ok := sum.fruitItemMap[recordKey]
